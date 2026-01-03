@@ -1,161 +1,178 @@
-import pygame
+import pygame as pg
+import sys
 import random
-import math
 
-# Constants
-WIDTH = 800
-HEIGHT = 450
-GRAVITY = 0.6
-SPEED = 4
-JUMP_VELOCITY = -12
-ENEMY_SPEED = 2
+pg.init()
+pg.mixer.init()
+
+# ======================
+# TELA
+# ======================
+WIDTH, HEIGHT = 900, 500
+screen = pg.display.set_mode((WIDTH, HEIGHT))
+pg.display.set_caption("Captain Adventure")
+
+clock = pg.time.Clock()
 FPS = 60
 
-# Game State
-game_state = "game"
-sound_on = True
+# ======================
+# CORES / FONTES
+# ======================
+WHITE = (255, 255, 255)
+font = pg.font.SysFont(None, 36)
 
-# Initialize Pygame
-pygame.init()
+# ======================
+# IMAGENS
+# ======================
+def load(img):
+    return pg.image.load(f"images/{img}").convert_alpha()
 
-# Screen
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Meu Jogo")  # Titulo da janela
+background = pg.transform.scale(load("background.png"), (1800, HEIGHT))
+clouds = pg.transform.scale(load("big_clouds.png"), (1800, 200))
+platform_img = pg.transform.scale(load("platform.png"), (400, 40))
 
-# Colors
-SKY_COLOR = (135, 206, 235)
+idle_imgs = [pg.transform.scale(load(f"captain_idle_{i}.png"), (96, 96)) for i in range(5)]
+run_imgs = [pg.transform.scale(load(f"captain_run_{i}.png"), (96, 96)) for i in range(5)]
 
-# Load Sounds (Verifique os caminhos dos arquivos!)
-try:
-    pygame.mixer.music.load("sons/music.wav")  # Música de fundo (looping)
-    pygame.mixer.music.set_volume(0.5)  # Ajusta o volume (0.0 a 1.0)
-    pygame.mixer.music.play(-1)  # -1 significa loop infinito
+enemy_idle = [pg.transform.scale(load(f"enemy_idle_{i}.png"), (80, 80)) for i in range(2)]
+enemy_run = [pg.transform.scale(load(f"enemy_run_{i}.png"), (80, 80)) for i in range(2)]
 
-    run_sound = pygame.mixer.Sound("sons/run.wav")
-    hit_sound = pygame.mixer.Sound("sons/hit.wav")
-except pygame.error as e:
-    print(f"Erro ao carregar sons: {e}")
-    run_sound = None
-    hit_sound = None
+# ======================
+# SONS
+# ======================
+pg.mixer.music.load("sounds/music.wav")
+pg.mixer.music.play(-1)
 
-# Load Images (Verifique os caminhos dos arquivos!)
-try:
-    captain_idle_img = pygame.image.load("images/captain_idle_0.png").convert_alpha()
-    captain_run_img = pygame.image.load("images/captain_run_0.png").convert_alpha()
-    enemy_image = pygame.image.load("images/enemy_idle_0.png").convert_alpha()
-except pygame.error as e:
-    print(f"Erro ao carregar imagens: {e}")
-    # Criar uma superfície vazia como fallback
-    captain_idle_img = pygame.Surface((50, 50))  # Tamanho arbitrário
-    captain_run_img = pygame.Surface((50, 50))
-    enemy_image = pygame.Surface((50, 50))
-    captain_idle_img.fill((255, 0, 255))  # Cor magenta para indicar erro
-    captain_run_img.fill((255, 0, 255))
-    enemy_image.fill((255, 0, 255))
+hit_sound = pg.mixer.Sound("sounds/hit.wav")
 
-# Captain (Player)
-captain_x = 200
-captain_y = HEIGHT - 100
-captain_vx = 0
-captain_vy = 0
+# ======================
+# CLASSES
+# ======================
+class Player:
+    def __init__(self):
+        self.rect = pg.Rect(100, 300, 50, 80)
+        self.vel_y = 0
+        self.on_ground = False
+        self.speed = 5
+        self.frame = 0
+        self.anim_time = 0
+        self.running = False
 
-# Enemies
-enemies = []
-enemies.append({"x": 500, "y": HEIGHT - 100, "vx": ENEMY_SPEED}) # Usamos dicionários para guardar as propriedades
-enemies.append({"x": 650, "y": HEIGHT - 100, "vx": ENEMY_SPEED})
+    def update(self, keys):
+        self.running = False
 
-# Game Loop
-running = True
-clock = pygame.time.Clock()
+        if keys[pg.K_RIGHT]:
+            self.rect.x += self.speed
+            self.running = True
 
-# Definir as superficies
-class CaptainClass(pygame.sprite.Sprite):
-    def __init__(self, image, x, y):
-        super().__init__()
-        self.image = image
-        self.rect = self.image.get_rect()
-        self.x = int(x)  # Garante que x seja inteiro
-        self.y = int(y)  # Garante que y seja inteiro
+        if keys[pg.K_LEFT]:
+            self.rect.x -= self.speed
+            self.running = True
 
+        if keys[pg.K_SPACE] and self.on_ground:
+            self.vel_y = -14
+            self.on_ground = False
 
-class EnemiesClass(pygame.sprite.Sprite):
-    def __init__(self, image, x, y):
-        super().__init__()
-        self.image = image
-        self.rect = self.image.get_rect()
-        self.x = x
-        self.y = y
+        self.vel_y += 0.8
+        self.rect.y += self.vel_y
 
+        if self.rect.bottom >= 360:
+            self.rect.bottom = 360
+            self.vel_y = 0
+            self.on_ground = True
 
-# Definir as instancias
-captain = CaptainClass(captain_idle_img, captain_x, captain_y)
-inimigo1 = EnemiesClass(enemy_image, enemies[0]["x"], enemies[0]["y"])
-inimigo2 = EnemiesClass(enemy_image, enemies[1]["x"], enemies[1]["y"])
+        self.anim_time += 1
+        if self.anim_time >= 6:
+            self.anim_time = 0
+            self.frame = (self.frame + 1) % 5
 
-while running:
-    # Events
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_SPACE and captain_vy == 0:
-                captain_vy = JUMP_VELOCITY
-                if sound_on and run_sound:
-                    run_sound.play()
+    def draw(self, cam_x):
+        img = run_imgs[self.frame] if self.running else idle_imgs[self.frame]
+        screen.blit(img, (self.rect.x - cam_x, self.rect.y))
 
-    # Input (Keyboard)
-    keys = pygame.key.get_pressed()
-    moving = False
-    if keys[pygame.K_RIGHT]:
-        captain_vx = SPEED
-        moving = True
-    elif keys[pygame.K_LEFT]:
-        captain_vx = SPEED
-        moving = True
-    else:
-        captain_vx = 0
+class Enemy:
+    def __init__(self, x):
+        self.rect = pg.Rect(x, 300, 60, 60)
+        self.frame = 0
+        self.anim_time = 0
 
-    # --- Captain Logic ---
-    # Gravity
-    captain_vy += GRAVITY
+    def update(self):
+        self.anim_time += 1
+        if self.anim_time >= 15:
+            self.anim_time = 0
+            self.frame = (self.frame + 1) % 2
 
-    # Update Position
-    captain_x += captain_vx
-    captain_y += captain_vy
+    def draw(self, cam_x):
+        screen.blit(enemy_run[self.frame], (self.rect.x - cam_x, self.rect.y))
 
-    # Keep on screen
-    if captain_y > HEIGHT - 50:
-        captain_y = HEIGHT - 50
-        captain_vy = 0
+# ======================
+# RESET DO JOGO
+# ======================
+def reset_game():
+    global player, enemy, camera_x, score
+    player = Player()
+    enemy = Enemy(600)
+    camera_x = 0
+    score = 0
 
-    # --- Enemies Logic ---
-    for enemy in enemies:
-        enemy["x"] += enemy["vx"]
-        if enemy["x"] < 0 or enemy["x"] > WIDTH:
-            enemy["vx"] *= -1
+# ======================
+# JOGO
+# ======================
+player = Player()
+enemy = Enemy(600)
 
-    #Converter para inteiro e atualizando com as novas coordenas
-    captain.x = int(captain_x)
-    captain.y = int(captain_y)
+camera_x = 0
+score = 0
 
-    # --- Draw ---
-    screen.fill(SKY_COLOR)  # Sky
-
-    # Draw the Captain
-    if moving:
-        screen.blit(captain_run_img, (captain.x, captain.y)) #jogador  - Jogador escrito de forma errada
-    else:
-        screen.blit(captain_idle_img, (captain.x, captain.y)) #jogador   - Jogador escrito de forma errada
-
-    # Draw the Enemies
-    for enemy in enemies:
-        screen.blit(enemy_image, (enemy["x"], enemy["y"]))
-
-    # Update the display
-    pygame.display.flip()  # Mostra tudo na tela
-
-    # Control the speed
+# ======================
+# LOOP PRINCIPAL
+# ======================
+while True:
     clock.tick(FPS)
 
-# Quit Pygame
-pygame.quit()
+    for event in pg.event.get():
+        if event.type == pg.QUIT:
+            pg.quit()
+            sys.exit()
+
+    keys = pg.key.get_pressed()
+
+    player.update(keys)
+    enemy.update()
+
+    # CÂMERA
+    camera_x = player.rect.x - 200
+    if camera_x < 0:
+        camera_x = 0
+
+    # COLISÃO → RESET
+    if player.rect.colliderect(enemy.rect):
+        hit_sound.play()
+        reset_game()
+
+    # NOVO INIMIGO
+    if enemy.rect.x < camera_x - 100:
+        enemy = Enemy(player.rect.x + random.randint(500, 800))
+        score += 1
+
+    # ======================
+    # DESENHO
+    # ======================
+    screen.fill(WHITE)
+
+    # NUVENS (atrás)
+    screen.blit(clouds, (-camera_x * 0.2, 30))
+
+    # BACKGROUND
+    screen.blit(background, (-camera_x * 0.5, 0))
+
+    # CHÃO
+    pg.draw.rect(screen, (100, 200, 100), (0, 360, WIDTH, 140))
+
+    enemy.draw(camera_x)
+    player.draw(camera_x)
+
+    score_txt = font.render(f"Pontos: {score}", True, (0, 0, 0))
+    screen.blit(score_txt, (20, 20))
+
+    pg.display.flip()
